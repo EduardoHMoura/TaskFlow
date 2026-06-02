@@ -611,9 +611,10 @@ import {
   sendPasswordResetEmail, updateProfile
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import {
-  getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc,
-  collection, getDocs, writeBatch, serverTimestamp,
-  enableIndexedDbPersistence
+  getFirestore, initializeFirestore, persistentLocalCache,
+  persistentMultipleTabManager,
+  doc, getDoc, setDoc, updateDoc, deleteDoc,
+  collection, getDocs, writeBatch, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
 
 const FIREBASE_READY = FIREBASE_CONFIG.apiKey !== "COLE_AQUI";
@@ -621,17 +622,28 @@ let app, auth, db, googleProvider;
 if (FIREBASE_READY) {
   app = initializeApp(FIREBASE_CONFIG);
   auth = getAuth(app);
-  db = getFirestore(app);
-  googleProvider = new GoogleAuthProvider(); googleProvider.addScope("email"); googleProvider.addScope("profile"); googleProvider.setCustomParameters({ prompt: "select_account" });
+  // Firebase 10: usar initializeFirestore com cache persistente (substitui enableIndexedDbPersistence)
+  try {
+    db = initializeFirestore(app, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+    });
+  } catch(e) {
+    // fallback se já inicializado
+    db = getFirestore(app);
+  }
+  googleProvider = new GoogleAuthProvider();
+  googleProvider.addScope("email");
+  googleProvider.addScope("profile");
+  googleProvider.setCustomParameters({ prompt: "select_account" });
   try { await setPersistence(auth, browserLocalPersistence); } catch(e) {}
-  try { await enableIndexedDbPersistence(db); } catch(e) { /* multi-tab ok */ }
 }
 
 // Expose for app
 window._fb = { FIREBASE_READY, auth, db, googleProvider,
   createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut,
   onAuthStateChanged, signInWithPopup, sendPasswordResetEmail, updateProfile,
-  doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, writeBatch, serverTimestamp };
+  doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, writeBatch, serverTimestamp,
+  getFirestore };
 window.dispatchEvent(new Event('firebase-ready'));
 </script>
 
@@ -807,7 +819,19 @@ async function loadUserData(user){
     state.profiles.forEach(p=>{if(!(p.id in state.agendaProfileFilter))state.agendaProfileFilter[p.id]=true});
     // Update lastLogin
     fb.updateDoc(fb.doc(fb.db,'users',uid),{lastLogin:fb.serverTimestamp()}).catch(()=>{});
-  }catch(e){console.warn('load error',e);toast('Erro ao carregar dados','error')}
+  }catch(e){
+    console.error('Firestore load error:', e.code, e.message);
+    if(e.code==='permission-denied'){
+      toast('Permissão negada. Verifique as regras do Firestore no console.firebase.google.com','error');
+    } else if(e.code==='unavailable'){
+      toast('Sem conexão com o servidor. Usando dados em cache.','error');
+    } else if(e.code==='not-found'){
+      // Usuário novo sem dados ainda — seed
+      if(state.user) await seedNewUser(state.user, state.user.displayName||'Usuário');
+    } else {
+      toast('Erro ao carregar dados: '+(e.message||e.code),'error');
+    }
+  }
   state.loading=false;syncEnd();
 }
 async function saveTask(t){
