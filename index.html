@@ -445,6 +445,14 @@ let unsubProjects=null, unsubTasks=null;
 const DEFAULT_PROJECT_ID = "_none";
 
 function uid(p){ return p+"_"+Date.now()+"_"+Math.random().toString(36).slice(2,7); }
+function reportFirestoreError(e,context){
+  console.error(context,e);
+  if(e && e.code==='permission-denied'){
+    toast('Permissão negada pelo Firestore — atualize as regras de segurança (veja o comentário no fim do arquivo)','error');
+  } else {
+    toast('Erro ao salvar: '+(e?.message||context),'error');
+  }
+}
 function todayStr(d=new Date()){ return d.toISOString().slice(0,10); }
 function fmtDate(s){ if(!s) return ""; const d=new Date(s+"T00:00"); return d.toLocaleDateString('pt-BR',{day:'2-digit',month:'short'}); }
 
@@ -549,8 +557,10 @@ async function loadUserData(uid_){
 }
 async function ensureDefaultProject(){
   if(!state.projects.find(p=>p.id===DEFAULT_PROJECT_ID)){
-    await setDoc(doc(db,'users',state.user.uid,'projects',DEFAULT_PROJECT_ID),
-      { name:"Sem projeto", color:"#9AA3AF", icon:"folder", desc:"", archived:false, createdAt:Date.now(), locked:true });
+    try{
+      await setDoc(doc(db,'users',state.user.uid,'projects',DEFAULT_PROJECT_ID),
+        { name:"Sem projeto", color:"#9AA3AF", icon:"folder", desc:"", archived:false, createdAt:Date.now(), locked:true });
+    }catch(e){ reportFirestoreError(e,'ensureDefaultProject'); }
   }
 }
 async function saveProfileField(patch){
@@ -632,13 +642,19 @@ function openProjectModal(p){
     const desc=modal.querySelector('#pjDesc').value.trim();
     const colorVal=modal.querySelector('#pjColor').value;
     const iconVal=iconsWrap.querySelector('button.sel')?.dataset.icon||'folder';
-    if(p){ await updateDoc(doc(db,'users',state.user.uid,'projects',p.id),{name,desc,color:colorVal,icon:iconVal}); toast('Projeto atualizado','success'); }
-    else{
-      const id=uid('proj');
-      await setDoc(doc(db,'users',state.user.uid,'projects',id),{name,desc,color:colorVal,icon:iconVal,archived:false,createdAt:Date.now()});
-      toast('Projeto criado!','success');
+    const saveBtn=modal.querySelector('#pjSave'); saveBtn.textContent='Salvando...'; saveBtn.disabled=true;
+    try{
+      if(p){ await updateDoc(doc(db,'users',state.user.uid,'projects',p.id),{name,desc,color:colorVal,icon:iconVal}); toast('Projeto atualizado','success'); }
+      else{
+        const id=uid('proj');
+        await setDoc(doc(db,'users',state.user.uid,'projects',id),{name,desc,color:colorVal,icon:iconVal,archived:false,createdAt:Date.now()});
+        toast('Projeto criado!','success');
+      }
+      modal.remove();
+    }catch(e){
+      reportFirestoreError(e,'saveProject');
+      saveBtn.textContent=p?'Salvar':'Criar projeto'; saveBtn.disabled=false;
     }
-    modal.remove();
   };
 }
 
@@ -694,15 +710,19 @@ async function createTask(partial){
     subtasks: partial.subtasks||[], recurrence: partial.recurrence||'none',
     googleEventId:null, gcalSync:false, createdAt:Date.now(), updatedAt:Date.now(), completedAt:null
   };
-  await setDoc(doc(db,'users',state.user.uid,'tasks',id), task);
-  if(task.dueDate && state.profile.gcalConnected) gcalUpsertEvent({id,...task});
-  toast('Tarefa criada!','success');
+  try{
+    await setDoc(doc(db,'users',state.user.uid,'tasks',id), task);
+    if(task.dueDate && state.profile.gcalConnected) gcalUpsertEvent({id,...task});
+    toast('Tarefa criada!','success');
+  }catch(e){ reportFirestoreError(e,'createTask'); }
 }
 async function updateTask(id,patch){
   patch.updatedAt=Date.now();
-  await updateDoc(doc(db,'users',state.user.uid,'tasks',id), patch);
-  const t=state.tasks.find(x=>x.id===id);
-  if(t && (patch.dueDate!==undefined) && state.profile.gcalConnected) gcalUpsertEvent({...t,...patch,id});
+  try{
+    await updateDoc(doc(db,'users',state.user.uid,'tasks',id), patch);
+    const t=state.tasks.find(x=>x.id===id);
+    if(t && (patch.dueDate!==undefined) && state.profile.gcalConnected) gcalUpsertEvent({...t,...patch,id});
+  }catch(e){ reportFirestoreError(e,'updateTask'); }
 }
 async function toggleComplete(id){
   const t=state.tasks.find(x=>x.id===id); if(!t) return;
@@ -910,12 +930,43 @@ function openMobileMore(){
   </div>`;
   document.body.appendChild(modal);
   modal.onclick=(e)=>{ if(e.target===modal) modal.remove(); };
-  modal.querySelector('#mmProjects').onclick=()=>{ modal.remove(); setView('tasks'); };
+  modal.querySelector('#mmProjects').onclick=()=>{ modal.remove(); openMobileProjectsModal(); };
   modal.querySelector('#mmReports').onclick=()=>{ modal.remove(); setView('reports'); };
   modal.querySelector('#mmSettings').onclick=()=>{ modal.remove(); setView('settings'); };
   modal.querySelector('#mmLogout').onclick=()=>{ modal.remove(); signOut(auth); };
 }
 document.getElementById('moreBtnM').onclick=openMobileMore;
+
+function openMobileProjectsModal(){
+  const modal=document.createElement('div'); modal.className='modal-bg active';
+  const items = state.projects.filter(p=>!p.archived).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
+  const rowsHtml = items.map(p=>{
+    const openCount = state.tasks.filter(t=>t.projectId===p.id && t.status!=='done').length;
+    return `<div class="proj-item" data-pid="${p.id}">
+      <span class="proj-dot" style="background:${p.color}"></span>
+      <span class="pname">${escapeHtml(p.name)}</span>
+      <span class="pcount">${openCount}</span>
+      ${p.locked?'':`<button class="pmenu" data-editp="${p.id}" style="opacity:1"><i data-lucide="pencil" style="width:14px;height:14px"></i></button>`}
+    </div>`;
+  }).join('');
+  modal.innerHTML=`<div class="modal" style="max-width:380px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <h3>Projetos</h3><button class="close-x">✕</button>
+    </div>
+    <div id="mobileProjList">${rowsHtml || '<div class="empty-state">Nenhum projeto ainda.</div>'}</div>
+    <button class="btn-primary" id="mobileNewProject" style="width:100%;justify-content:center;margin-top:14px"><i data-lucide="plus" style="width:15px;height:15px"></i>Novo projeto</button>
+  </div>`;
+  document.body.appendChild(modal);
+  lucide.createIcons();
+  modal.querySelector('.close-x').onclick=()=>modal.remove();
+  modal.onclick=(e)=>{ if(e.target===modal) modal.remove(); };
+  modal.querySelector('#mobileNewProject').onclick=()=>{ modal.remove(); openProjectModal(null); };
+  modal.querySelectorAll('[data-editp]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); const p=state.projects.find(x=>x.id===b.dataset.editp); modal.remove(); openProjectModal(p); });
+  modal.querySelectorAll('.proj-item').forEach(el=>el.onclick=(e)=>{
+    if(e.target.closest('.pmenu')) return;
+    state.ui.activeProject=el.dataset.pid; modal.remove(); setView('tasks');
+  });
+}
 
 /* ============================================================
    15. RENDER ROUTER
@@ -1340,17 +1391,45 @@ window.toast=toast;
 /* ============================================================
    23. GOOGLE CALENDAR INTEGRATION
    ============================================================ */
-let gcalState={ gapiReady:false, gsiReady:false, tokenClient:null, accessToken:null, events:[] };
-window.gapiLoaded=()=>{ if(typeof gapi==='undefined') return; gapi.load('client',async()=>{ await gapi.client.init({apiKey:GCAL_CONFIG.apiKey,discoveryDocs:['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest']}); gcalState.gapiReady=true; }); };
-window.gsiLoaded=()=>{ if(typeof google==='undefined') return;
+let gcalState={ gapiReady:false, gsiReady:false, gapiInitStarted:false, tokenClient:null, accessToken:null, events:[] };
+window.gapiLoaded=()=>{
+  if(typeof gapi==='undefined' || gcalState.gapiInitStarted) return;
+  gcalState.gapiInitStarted=true;
+  gapi.load('client',async()=>{
+    try{
+      await gapi.client.init({apiKey:GCAL_CONFIG.apiKey,discoveryDocs:['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest']});
+      gcalState.gapiReady=true;
+      gcalUpdateIndicator();
+    }catch(e){ console.warn('gapi.client.init falhou',e); gcalState.gapiInitStarted=false; }
+  });
+};
+window.gsiLoaded=()=>{
+  if(typeof google==='undefined' || gcalState.tokenClient) return;
   gcalState.tokenClient=google.accounts.oauth2.initTokenClient({ client_id:GCAL_CONFIG.clientId, scope:GCAL_CONFIG.scope, callback:(resp)=>{
-    if(resp.access_token){ gcalState.accessToken=resp.access_token; gapi.client.setToken(resp); saveProfileField({gcalConnected:true}); toast('📅 Google Calendar conectado!','success'); gcalFetchEvents(); render(); }
+    if(resp && resp.access_token){ gcalState.accessToken=resp.access_token; gapi.client.setToken(resp); saveProfileField({gcalConnected:true}); toast('📅 Google Calendar conectado!','success'); gcalFetchEvents(); render(); }
+    else{ toast('Não foi possível conectar ao Google Calendar','error'); }
   }});
   gcalState.gsiReady=true;
 };
+// Fallback robusto: os scripts do Google carregam de forma assíncrona e podem
+// disparar o evento onload ANTES deste módulo terminar de carregar (que
+// precisa baixar o SDK do Firebase primeiro). Por isso, fazemos polling até
+// que 'gapi' e 'google' existam no window, independente de qual chegou primeiro.
+let gcalPollAttempts=0;
+const gcalInitPoll=setInterval(()=>{
+  gcalPollAttempts++;
+  if(typeof gapi!=='undefined' && !gcalState.gapiReady) window.gapiLoaded();
+  if(typeof google!=='undefined' && !gcalState.tokenClient) window.gsiLoaded();
+  if((gcalState.gapiReady && gcalState.tokenClient) || gcalPollAttempts>60) clearInterval(gcalInitPoll);
+},300);
 async function gcalConnect(){
-  if(!gcalState.tokenClient){ toast('Google ainda carregando, tente novamente em instantes','error'); return; }
+  if(!gcalState.tokenClient || !gcalState.gapiReady){ toast('Conectando ao Google... tente novamente em alguns segundos','error'); return; }
   gcalState.tokenClient.requestAccessToken();
+}
+function gcalUpdateIndicator(){
+  const ind=document.getElementById('gcalIndicator'); if(!ind) return;
+  if(state.profile.gcalConnected && gcalState.gapiReady){ ind.style.display='inline-flex'; ind.textContent='📅 Agenda sincronizada'; }
+  else ind.style.display='none';
 }
 function gcalDisconnect(){ saveProfileField({gcalConnected:false}); gcalState.accessToken=null; toast('Google Calendar desconectado'); render(); }
 async function gcalFetchEvents(){
