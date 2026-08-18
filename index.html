@@ -8,6 +8,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lucide@latest"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://apis.google.com/js/api.js" async defer></script>
 <style>
 /* ============ DESIGN TOKENS ============ */
 :root{
@@ -93,6 +95,28 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 input,select,textarea{font-family:inherit;font-size:14px;color:var(--text-primary)}
 ::-webkit-scrollbar{width:10px;height:10px}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px}
+
+/* ── Google Calendar ── */
+.gcal-event{border-left:3px solid #4285F4;background:rgba(66,133,244,.08);backdrop-filter:blur(8px);border-radius:10px;padding:8px 12px;margin:4px 0;font-size:13px;display:flex;align-items:center;gap:8px;cursor:pointer;transition:background .15s}
+.gcal-event:hover{background:rgba(66,133,244,.14)}
+.gcal-badge{display:inline-flex;align-items:center;gap:4px;background:rgba(66,133,244,.15);color:#4285F4;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700}
+.gcal-sync-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:10px;background:rgba(66,133,244,.12);color:#4285F4;font-size:12px;font-weight:600;border:1px solid rgba(66,133,244,.25);transition:all .2s;cursor:pointer}
+.gcal-sync-btn:hover{background:rgba(66,133,244,.2);transform:translateY(-1px)}
+.gcal-sync-btn.synced{background:rgba(52,199,89,.1);color:#34C759;border-color:rgba(52,199,89,.25)}
+.gcal-import-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;background:var(--glass-bg-subtle,rgba(255,255,255,.35));margin-bottom:6px;font-size:13px;cursor:pointer;transition:background .15s}
+.gcal-import-item:hover{background:var(--glass-bg,rgba(255,255,255,.65))}
+.gcal-import-item input[type=checkbox]{width:16px;height:16px;accent-color:#4285F4;cursor:pointer;flex-shrink:0}
+.gcal-import-item .ei-title{flex:1;font-weight:500}
+.gcal-import-item .ei-date{font-size:11px;color:var(--text-muted)}
+.gcal-connect-card{background:var(--glass-bg,rgba(255,255,255,.65));backdrop-filter:blur(20px);border:1px solid var(--glass-border,rgba(255,255,255,.5));border-radius:16px;padding:20px;display:flex;align-items:center;gap:16px;margin-bottom:16px}
+.gcal-connect-card .gcal-logo{width:44px;height:44px;flex-shrink:0}
+.gcal-connect-card .gcal-info{flex:1}
+.gcal-connect-card .gcal-info b{display:block;font-size:14px;margin-bottom:2px}
+.gcal-connect-card .gcal-info span{font-size:12px;color:var(--text-muted)}
+.gcal-status-dot{width:8px;height:8px;border-radius:50%;background:#9AA3AF;flex-shrink:0}
+.gcal-status-dot.connected{background:#34C759;box-shadow:0 0 6px rgba(52,199,89,.5)}
+.gcal-indicator{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted);padding:4px 8px;border-radius:6px;background:var(--glass-bg-subtle,rgba(255,255,255,.35))}
+.gcal-indicator.syncing{color:#4285F4}
 
 /* ============ AUTH SCREEN ============ */
 /* ── AUTH SCREEN iOS Glass ── */
@@ -569,7 +593,10 @@ textarea.input{resize:vertical;min-height:70px;font-family:inherit}
       </section>
 
       <section class="view" data-view="agenda">
-        <div class="page-head"><div><div class="page-title">Agenda</div><div class="page-sub">Todas as tarefas</div></div></div>
+        <div class="page-head">
+          <div><div class="page-title">Agenda</div><div class="page-sub">Todas as tarefas</div></div>
+          <div id="agendaGcalActions" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
+        </div>
         <div class="agenda-filters" id="agendaFilters"></div>
         <div class="agenda-modes" id="agendaModes">
           <button class="active" data-mode="today">Hoje</button>
@@ -734,6 +761,15 @@ window.dispatchEvent(new Event('firebase-ready'));
 </script>
 
 <script>
+/* ── Lucide safe wrapper ── */
+function safeIcons(){
+  if(typeof lucide !== 'undefined'){
+    try{ lucide.createIcons(); }catch(e){}
+  } else {
+    setTimeout(safeIcons, 80);
+  }
+}
+
 /* ============ DATA & CONSTANTS ============ */
 const LS_LOCAL = { theme:'taskflow_theme', sidebar:'taskflow_sidebar', activeProfile:'taskflow_active_profile' };
 const COLOR_MEANINGS={red:'Vermelho transmite energia, urgência e paixão.',orange:'Laranja estimula criatividade e entusiasmo.',yellow:'Amarelo gera otimismo e clareza mental.',green:'Verde representa crescimento e equilíbrio.',blue:'Azul transmite confiança e foco.',purple:'Roxo evoca introspecção e criatividade.',pink:'Rosa expressa acolhimento e afeto.',gray:'Cinza transmite neutralidade e profissionalismo.'};
@@ -773,7 +809,7 @@ function escapeHTML(s){return(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&l
 function toast(msg,type){const el=document.createElement('div');el.className='toast '+(type||'');el.textContent=msg;$('#toasts').appendChild(el);setTimeout(()=>{el.style.opacity='0';el.style.transform='translateX(20px)';setTimeout(()=>el.remove(),300)},3000)}
 function beep(){try{const ctx=new(window.AudioContext||window.webkitAudioContext)();const o=ctx.createOscillator(),g=ctx.createGain();o.frequency.value=880;o.type='sine';o.connect(g);g.connect(ctx.destination);g.gain.setValueAtTime(.2,ctx.currentTime);g.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.4);o.start();o.stop(ctx.currentTime+.4)}catch(e){}}
 function applyProfileTheme(){const p=activeProfile();if(!p)return;const root=document.documentElement;if(state.theme==='dark'){root.style.setProperty('--profile-primary',lighten(p.color,.15));root.style.setProperty('--profile-primary-soft',lighten(p.colorSoft||p.color,.10));}else{root.style.setProperty('--profile-primary',p.color);root.style.setProperty('--profile-primary-soft',p.colorSoft||p.color);}root.style.setProperty('--profile-tint',p.tint||'#EEE');root.style.setProperty('--profile-contrast','#FFFFFF');}
-function setTheme(t){state.theme=t;document.documentElement.setAttribute('data-theme',t);const ic=t==='dark'?'sun':'moon';if($('#themeBtn'))$('#themeBtn').innerHTML='<i data-lucide="'+ic+'"></i>';if($('#drawerTheme'))$('#drawerTheme').innerHTML='<i data-lucide="'+ic+'"></i> Alternar tema';lucide.createIcons();applyProfileTheme();localStorage.setItem(LS_LOCAL.theme,t)}
+function setTheme(t){state.theme=t;document.documentElement.setAttribute('data-theme',t);const ic=t==='dark'?'sun':'moon';if($('#themeBtn'))$('#themeBtn').innerHTML='<i data-lucide="'+ic+'"></i>';if($('#drawerTheme'))$('#drawerTheme').innerHTML='<i data-lucide="'+ic+'"></i> Alternar tema';safeIcons();applyProfileTheme();localStorage.setItem(LS_LOCAL.theme,t)}
 function notify(text){if('Notification' in window&&Notification.permission==='granted'){try{new Notification('TaskFlow',{body:text})}catch(e){}}}
 function syncStart(){$('#syncInd').classList.add('active')}
 function syncEnd(){setTimeout(()=>$('#syncInd').classList.remove('active'),300)}
@@ -800,7 +836,7 @@ function setupAuthValidation(){
   sP.oninput=()=>{const v=sP.value;const s=pwdStrength(v);$('#pwdStrength').className='pwd-strength s'+s;sP.className=v.length>=6?'valid':(v?'invalid':'');$('#signupPwdHint').textContent=v.length<6?'Mínimo 6 caracteres':(s===1?'Senha fraca':s===2?'Senha média':'Senha forte');$('#signupPwdHint').className='field-hint '+(v.length>=6?'success':'error');if(sP2.value)sP2.dispatchEvent(new Event('input'))};
   sP2.oninput=()=>{const v=sP2.value,ok=v&&v===sP.value;sP2.className=v?(ok?'valid':'invalid'):'';$('#signupPwd2Hint').textContent=v&&!ok?'As senhas não coincidem':(ok?'Senhas coincidem ✓':'');$('#signupPwd2Hint').className='field-hint '+(ok?'success':'error')};
 }
-function showAuth(){$('#authScreen').classList.add('active');$('#appRoot').style.display='none';lucide.createIcons()}
+function showAuth(){$('#authScreen').classList.add('active');$('#appRoot').style.display='none';safeIcons()}
 function hideAuth(){$('#authScreen').classList.remove('active');$('#appRoot').style.display='grid'}
 function toggleAuthTab(which){const isL=which==='login';$('#tabLogin').classList.toggle('active',isL);$('#tabSignup').classList.toggle('active',!isL);$('#formLogin').style.display=isL?'block':'none';$('#formSignup').style.display=isL?'none':'block'}
 
@@ -920,7 +956,7 @@ async function loadUserData(user){
   }
   state.loading=false;syncEnd();
   // Garantir render após carregar dados (fix mobile)
-  setTimeout(()=>{renderAll();applyProfileTheme();lucide.createIcons();},50);
+  setTimeout(()=>{renderAll();applyProfileTheme();safeIcons();},50);
 }
 async function saveTask(t){
   if(!state.user||!window._fb)return;
@@ -977,7 +1013,7 @@ function renderProfilesBar(){
   }
   // mobile header profile
   const p=activeProfile();if(p){$('#mhProfName').textContent=p.name;$('#mhProf').querySelector('.dot').style.background=p.color}
-  lucide.createIcons();
+  safeIcons();
 }
 function switchProfile(id){state.activeProfile=id;localStorage.setItem(LS_LOCAL.activeProfile,id);applyProfileTheme();renderProfilesBar();renderAll()}
 
@@ -1039,10 +1075,10 @@ function renderDashboard(){
   $('#streakDays').textContent=streak;
   const heat=$('#heatmap');heat.innerHTML='';
   for(let i=27;i>=0;i--){const dt=new Date();dt.setDate(dt.getDate()-i);const iso=dt.toISOString().slice(0,10);const count=state.tasks.filter(t=>t.status==='done'&&t.due===iso).length;const c=document.createElement('div');c.className='heat-cell';if(count>0){const p=activeProfile();const op=Math.min(1,.25+count*.2);c.style.background='color-mix(in oklab, '+p.color+' '+Math.round(op*100)+'%, transparent)'}c.title=iso+': '+count+' concluída(s)';heat.appendChild(c)}
-  lucide.createIcons();
+  safeIcons();
 }
 function statCard(icon,label,val,meta){return '<div class="card stat-card"><div style="display:flex;justify-content:space-between;align-items:flex-start"><span class="stat-label">'+label+'</span><i data-lucide="'+icon+'" style="width:16px;height:16px;color:var(--profile-primary)"></i></div><div class="stat-value">'+val+'</div><div class="stat-meta">'+meta+'</div></div>'}
-function renderMiniList(sel,list,pid){const el=$(sel);if(!list.length){el.innerHTML=emptyStateHTML(pid);return}el.innerHTML=list.slice(0,5).map(t=>taskRowHTML(t,{mini:true})).join('');bindTaskRowEvents(el);lucide.createIcons()}
+function renderMiniList(sel,list,pid){const el=$(sel);if(!list.length){el.innerHTML=emptyStateHTML(pid);return}el.innerHTML=list.slice(0,5).map(t=>taskRowHTML(t,{mini:true})).join('');bindTaskRowEvents(el);safeIcons()}
 function weekRange(){const d=new Date(),day=d.getDay();const start=new Date(d);start.setDate(d.getDate()-day);const end=new Date(start);end.setDate(start.getDate()+6);return{start:start.toISOString().slice(0,10),end:end.toISOString().slice(0,10)}}
 
 /* ============ TASKS ============ */
@@ -1053,7 +1089,7 @@ function renderTasks(){
   let list=state.tasks.filter(t=>{if(prio&&t.priority!==prio)return false;if(stt&&t.status!==stt)return false;if(prof&&t.profile!==prof)return false;if(q){const hay=(t.title+' '+t.desc+' '+(t.tags||[]).join(' ')).toLowerCase();if(!hay.includes(q))return false}return true});
   list.sort((a,b)=>{if(sort==='priority'){const o={high:0,mid:1,low:2};return o[a.priority]-o[b.priority]}if(sort==='created')return b.createdAt-a.createdAt;return(a.due||'9').localeCompare(b.due||'9')});
   const c=$('#tasksContainer');
-  if(!list.length){c.innerHTML=emptyStateHTML(state.activeProfile);lucide.createIcons();return}
+  if(!list.length){c.innerHTML=emptyStateHTML(state.activeProfile);safeIcons();return}
   if(state.taskMode==='list'){
     c.innerHTML='<div class="task-list">'+list.map(t=>taskRowHTML(t)).join('')+'</div>';
   }else if(state.taskMode==='kanban'){
@@ -1063,7 +1099,7 @@ function renderTasks(){
   }else{
     c.innerHTML='<div class="board">'+list.map(t=>boardCardHTML(t)).join('')+'</div>';
   }
-  bindTaskRowEvents(c);bindSwipe(c);lucide.createIcons();
+  bindTaskRowEvents(c);bindSwipe(c);safeIcons();
 }
 function taskRowHTML(t,opts){opts=opts||{};const p=profileById(t.profile),overdue=isOverdue(t),subs=t.subtasks||[],subTotal=subs.length,subDone=subs.filter(s=>s.done).length;
   const inner='<div class="task-row '+(t.status==='done'?'done':'')+' '+(overdue?'overdue':'')+'" data-id="'+t.id+'" style="--p-color:'+p.color+'">'+
@@ -1118,17 +1154,57 @@ function renderAgendaFilters(){
   all.onclick=()=>{const v=!Object.values(state.agendaProfileFilter).every(x=>x);state.profiles.forEach(p=>state.agendaProfileFilter[p.id]=v);renderAgenda()};
   f.appendChild(all);
   state.profiles.forEach(p=>{const b=document.createElement('button');b.className='profile-chip'+(state.agendaProfileFilter[p.id]?'':' off');b.style.borderLeft='3px solid '+p.color;b.innerHTML='<span class="dot" style="background:'+p.color+'"></span>'+p.name;b.onclick=()=>{state.agendaProfileFilter[p.id]=!state.agendaProfileFilter[p.id];renderAgenda()};f.appendChild(b)});
-  lucide.createIcons();
+  safeIcons();
 }
 function agendaTasks(){return state.tasks.filter(t=>state.agendaProfileFilter[t.profile]!==false)}
 function renderAgenda(){
   renderAgendaFilters();
+  // Botões de ação do Google Calendar
+  const agendaActions = $('#agendaGcalActions');
+  if(agendaActions){
+    if(gcal.connected){
+      agendaActions.innerHTML = `
+        <span id="gcalIndicator" class="gcal-indicator" style="display:none"></span>
+        <button class="gcal-sync-btn" onclick="gcalShowImportModal()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Importar eventos
+        </button>
+        <button class="gcal-sync-btn synced" onclick="gcalSyncAll()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          Sincronizar
+        </button>`;
+    } else {
+      agendaActions.innerHTML = `
+        <button class="gcal-sync-btn" onclick="gcalConnect()" ${!gcal.ready?'disabled':''}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+          Conectar Google Calendar
+        </button>`;
+    }
+    gcalUpdateIndicator(gcal.syncing);
+  }
   const c=$('#agendaContainer'),mode=state.agendaMode,list=agendaTasks();
   if(mode==='today'){
     const t=list.filter(x=>x.due===todayISO());
-    if(!t.length){c.innerHTML=emptyStateHTML(state.activeProfile);lucide.createIcons();return}
+    // Eventos do Google Calendar de hoje
+    const gcalToday = gcal.connected ? gcal.events.filter(e=>{
+      const d=(e.start?.date||e.start?.dateTime||'').slice(0,10);
+      return d===todayISO();
+    }) : [];
+    if(!t.length && !gcalToday.length){c.innerHTML=emptyStateHTML(state.activeProfile);safeIcons();return}
     const byProf={};t.forEach(x=>{(byProf[x.profile]=byProf[x.profile]||[]).push(x)});
-    c.innerHTML=Object.entries(byProf).map(([pid,items])=>{const p=profileById(pid);return '<div class="card" style="margin-bottom:12px;border-top:3px solid '+p.color+'"><div class="card-title" style="color:'+p.color+'">'+p.name+'</div><div class="task-list">'+items.map(t=>taskRowHTML(t)).join('')+'</div></div>'}).join('');
+    const gcalHtml = gcalToday.length ? `<div class="card" style="margin-bottom:12px;border-top:3px solid #4285F4">
+      <div class="card-title" style="color:#4285F4;display:flex;align-items:center;gap:6px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="#4285F4"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM9 10H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2zm-8 4H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2z"/></svg>
+        Google Calendar
+      </div>
+      ${gcalToday.map(e=>`<div class="gcal-event">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="#4285F4"><circle cx="12" cy="12" r="10"/></svg>
+        <span style="flex:1;font-weight:500">${e.summary||'Sem título'}</span>
+        ${e.start?.dateTime?'<span style="font-size:11px;color:var(--text-muted)">'+new Date(e.start.dateTime).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})+'</span>':''}
+        <span class="gcal-badge">GCal</span>
+      </div>`).join('')}
+    </div>` : '';
+    c.innerHTML = gcalHtml + Object.entries(byProf).map(([pid,items])=>{const p=profileById(pid);return '<div class="card" style="margin-bottom:12px;border-top:3px solid '+p.color+'"><div class="card-title" style="color:'+p.color+'">'+p.name+'</div><div class="task-list">'+items.map(t=>taskRowHTML(t)).join('')+'</div></div>'}).join('');
     bindTaskRowEvents(c);bindSwipe(c);
   }else if(mode==='week'){
     const wr=weekRange(),start=new Date(wr.start+'T00:00'),days=[];
@@ -1141,11 +1217,11 @@ function renderAgenda(){
     c.innerHTML='<div class="month-grid">'+['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'].map(x=>'<div style="text-align:center;font-size:11px;color:var(--text-muted);font-weight:600;padding:6px 4px">'+x+'</div>').join('')+cells.map(d=>{if(!d)return '<div></div>';const iso=d.toISOString().slice(0,10),items=list.filter(x=>x.due===iso);const isToday=iso===todayISO();const visible=items.slice(0,3);const extra=items.length-3;return '<div class="month-day'+(isToday?' today':'')+'" data-dayiso="'+iso+'" style="cursor:pointer"><div class="day-num">'+d.getDate()+'</div>'+visible.map(t=>{const p=profileById(t.profile);return '<div class="month-task" style="background:'+p.color+';opacity:'+(t.status==='done'?'.5':'1')+'" title="'+escapeHTML(t.title)+'">'+escapeHTML(t.title)+'</div>'}).join('')+(extra>0?'<div class="month-more">+'+extra+' mais</div>':'')+'</div>'}).join('')+'</div>';
   }else{
     const t=list.filter(x=>x.due&&x.due>=todayISO()&&x.status!=='done').sort((a,b)=>a.due.localeCompare(b.due));
-    if(!t.length){c.innerHTML=emptyStateHTML(state.activeProfile);lucide.createIcons();return}
+    if(!t.length){c.innerHTML=emptyStateHTML(state.activeProfile);safeIcons();return}
     c.innerHTML='<div class="task-list">'+t.map(x=>taskRowHTML(x)).join('')+'</div>';
     bindTaskRowEvents(c);bindSwipe(c);
   }
-  lucide.createIcons();
+  safeIcons();
 }
 
 /* ============ TIMER MODULE ============ */
@@ -1197,7 +1273,7 @@ function renderTimerView(){
     if(p){phaseLabel=p.phase==='focus'?'🍅 Foco':p.phase==='short'?'☕ Pausa curta':'🌿 Pausa longa';remaining=fmtTime(Math.max(0,Math.floor((p.endAt-Date.now())/1000)))}
     el.innerHTML='<div class="card" style="text-align:center;padding:40px"><div style="font-size:12px;color:var(--text-secondary);text-transform:uppercase;font-weight:600">'+phaseLabel+'</div><div style="font-size:14px;color:var(--text-muted);margin:6px 0">'+escapeHTML(t.title)+'</div><div style="font-size:72px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.03em;color:var(--profile-primary)">'+(p?remaining:fmtTime(currentTimerSec()))+'</div><div style="margin-top:20px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"><button class="btn btn-primary" onclick="stopTimer()"><i data-lucide="pause"></i> Pausar</button>'+(!p?'<button class="btn btn-ghost" onclick="startPomodoro(\''+t.id+'\')">🍅 Pomodoro</button>':'')+'</div><div style="margin-top:14px;color:var(--text-muted);font-size:12px">Total: '+fmtTime((t.timeSpent||0)+currentTimerSec())+' · '+(t.pomodoros||0)+' 🍅</div></div>';
   }
-  lucide.createIcons();
+  safeIcons();
 }
 function pomoConfigHTML(){const c=state.settings.pomodoro;return '<div class="row-2"><div class="field"><label>Foco (min)</label><input type="number" class="input" min="15" max="60" value="'+c.focus+'" onchange="state.settings.pomodoro.focus=+this.value;saveSettingsRemote()"></div><div class="field"><label>Pausa curta</label><input type="number" class="input" min="3" max="10" value="'+c.short+'" onchange="state.settings.pomodoro.short=+this.value;saveSettingsRemote()"></div></div><div class="row-2"><div class="field"><label>Pausa longa</label><input type="number" class="input" min="10" max="30" value="'+c.long+'" onchange="state.settings.pomodoro.long=+this.value;saveSettingsRemote()"></div><div class="field"><label>Ciclos</label><input type="number" class="input" min="2" max="6" value="'+c.cycles+'" onchange="state.settings.pomodoro.cycles=+this.value;saveSettingsRemote()"></div></div>'}
 window.stopTimer=stopTimer;window.startPomodoro=startPomodoro;window.saveSettingsRemote=saveSettingsRemote;
@@ -1210,14 +1286,53 @@ function renderReports(){
   const dayTotals=days.map(iso=>state.sessions.filter(s=>s.date===iso).reduce((a,s)=>a+s.duration,0));
   const maxV=Math.max(60,...dayTotals);
   el.innerHTML='<div class="grid grid-2"><div class="card"><div class="card-title">Tempo por perfil (semana)</div>'+state.profiles.map(p=>{const sec=byProf[p.id]||0,pct=Math.min(100,sec/3600/10*100);return '<div style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span><i data-lucide="'+p.icon+'" style="width:14px;height:14px;color:'+p.color+'"></i> '+p.name+'</span><b>'+fmtTime(sec)+'</b></div><div class="progress" style="--p-color:'+p.color+'"><span style="width:'+pct+'%;background:'+p.color+'"></span></div></div>'}).join('')+'</div><div class="card"><div class="card-title">Distribuição (7 dias)</div><div class="bars">'+days.map((d,i)=>{const h=dayTotals[i]/maxV*100,dt=new Date(d+'T00:00');return '<div class="bar"><span style="height:'+h+'%"></span>'+dt.toLocaleDateString('pt-BR',{weekday:'short'}).slice(0,3)+'</div>'}).join('')+'</div></div></div>';
-  lucide.createIcons();
+  safeIcons();
 }
 
 /* ============ SETTINGS ============ */
 function renderSettings(){
   const el=$('#settingsView');
-  el.innerHTML='<div class="card"><div class="card-title">Perfis</div>'+state.profiles.map(p=>'<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)"><div style="width:32px;height:32px;border-radius:8px;background:'+p.color+';display:grid;place-items:center;color:#fff"><i data-lucide="'+p.icon+'" style="width:16px;height:16px"></i></div><div style="flex:1"><b>'+p.name+'</b><div style="font-size:11px;color:var(--text-muted)">'+p.color+'</div></div>'+(p.custom?'<button class="btn btn-ghost btn-sm" onclick="deleteProfile(\''+p.id+'\')"><i data-lucide="trash-2" style="width:14px;height:14px"></i></button>':'')+'</div>').join('')+(state.profiles.length<4?'<button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="openProfileModal()"><i data-lucide="plus" style="width:14px;height:14px"></i> Novo perfil</button>':'')+'</div><div class="card" style="margin-top:16px"><div class="card-title">Pomodoro</div>'+pomoConfigHTML()+'</div><div class="card" style="margin-top:16px"><div class="card-title">Notificações</div><label style="display:flex;gap:10px;align-items:center;padding:6px 0"><input type="checkbox" '+(state.settings.notifications.reminders?'checked':'')+' onchange="state.settings.notifications.reminders=this.checked;saveSettingsRemote()"> Lembretes</label><label style="display:flex;gap:10px;align-items:center;padding:6px 0"><input type="checkbox" '+(state.settings.notifications.overdue?'checked':'')+' onchange="state.settings.notifications.overdue=this.checked;saveSettingsRemote()"> Alerta de atrasadas</label><label style="display:flex;gap:10px;align-items:center;padding:6px 0"><input type="checkbox" '+(state.settings.notifications.pomodoro?'checked':'')+' onchange="state.settings.notifications.pomodoro=this.checked;saveSettingsRemote()"> Som do Pomodoro</label></div><div class="card" style="margin-top:16px"><div class="card-title">Dados</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost btn-sm" onclick="exportData()"><i data-lucide="download" style="width:14px;height:14px"></i> Exportar JSON</button></div></div>';
-  lucide.createIcons();
+  // Seção Google Calendar
+  const gcalSection = `<div class="card" style="margin-bottom:16px">
+    <div class="card-title" style="display:flex;align-items:center;gap:8px">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="18" rx="2" stroke="#4285F4" stroke-width="2"/><line x1="3" y1="9" x2="21" y2="9" stroke="#4285F4" stroke-width="2"/><line x1="8" y1="2" x2="8" y2="6" stroke="#4285F4" stroke-width="2" stroke-linecap="round"/><line x1="16" y1="2" x2="16" y2="6" stroke="#4285F4" stroke-width="2" stroke-linecap="round"/></svg>
+      Integração Google Calendar
+    </div>
+    <div class="gcal-connect-card">
+      <svg class="gcal-logo" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg"><rect x="6" y="6" width="36" height="36" rx="4" fill="#fff" stroke="#E0E0E0" stroke-width="1"/><rect x="6" y="14" width="36" height="2" fill="#4285F4"/><rect x="6" y="6" width="36" height="8" rx="4" fill="#1A73E8"/><text x="24" y="34" text-anchor="middle" fill="#1A73E8" font-size="14" font-weight="700" font-family="Arial">G</text></svg>
+      <div class="gcal-info">
+        <b>Google Calendar</b>
+        <span>${gcal.connected ? '✓ Conectado — sincronização ativa' : GCAL_CONFIG.clientId === 'COLE_SEU_CLIENT_ID_AQUI' ? '⚠ Configure as credenciais no código' : 'Não conectado'}</span>
+      </div>
+      <div class="gcal-status-dot ${gcal.connected ? 'connected' : ''}"></div>
+    </div>
+    ${gcal.connected ? `
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <button class="gcal-sync-btn synced" onclick="gcalSyncAll()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          Sincronizar agora
+        </button>
+        <button class="gcal-sync-btn" onclick="gcalShowImportModal()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Importar eventos
+        </button>
+        <button class="gcal-sync-btn" style="color:var(--prio-high);border-color:rgba(255,59,48,.2);background:rgba(255,59,48,.06)" onclick="gcalDisconnect()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64a9 9 0 11-12.73 0M12 2v10"/></svg>
+          Desconectar
+        </button>
+      </div>
+      ${gcal.lastSync ? '<p style="font-size:11px;color:var(--text-muted)">Última sincronização: '+gcal.lastSync.toLocaleString('pt-BR')+'</p>' : ''}
+    ` : `
+      <button class="gcal-sync-btn" style="width:100%;justify-content:center;padding:12px" onclick="gcalConnect()" ${!gcal.ready||GCAL_CONFIG.clientId==='COLE_SEU_CLIENT_ID_AQUI'?'disabled':''}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+        ${GCAL_CONFIG.clientId === 'COLE_SEU_CLIENT_ID_AQUI' ? 'Configure o Client ID no código' : 'Conectar Google Calendar'}
+      </button>
+      ${GCAL_CONFIG.clientId === 'COLE_SEU_CLIENT_ID_AQUI' ? '<p style="font-size:11px;color:var(--text-muted);margin-top:8px">Acesse console.cloud.google.com → Projeto taskflow-50000 → Credenciais → Criar OAuth Client ID e API Key</p>' : ''}
+    `}
+  </div>`;
+
+  el.innerHTML=gcalSection+'<div class="card"><div class="card-title">Perfis</div>'+state.profiles.map(p=>'<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)"><div style="width:32px;height:32px;border-radius:8px;background:'+p.color+';display:grid;place-items:center;color:#fff"><i data-lucide="'+p.icon+'" style="width:16px;height:16px"></i></div><div style="flex:1"><b>'+p.name+'</b><div style="font-size:11px;color:var(--text-muted)">'+p.color+'</div></div>'+(p.custom?'<button class="btn btn-ghost btn-sm" onclick="deleteProfile(\''+p.id+'\')"><i data-lucide="trash-2" style="width:14px;height:14px"></i></button>':'')+'</div>').join('')+(state.profiles.length<4?'<button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="openProfileModal()"><i data-lucide="plus" style="width:14px;height:14px"></i> Novo perfil</button>':'')+'</div><div class="card" style="margin-top:16px"><div class="card-title">Pomodoro</div>'+pomoConfigHTML()+'</div><div class="card" style="margin-top:16px"><div class="card-title">Notificações</div><label style="display:flex;gap:10px;align-items:center;padding:6px 0"><input type="checkbox" '+(state.settings.notifications.reminders?'checked':'')+' onchange="state.settings.notifications.reminders=this.checked;saveSettingsRemote()"> Lembretes</label><label style="display:flex;gap:10px;align-items:center;padding:6px 0"><input type="checkbox" '+(state.settings.notifications.overdue?'checked':'')+' onchange="state.settings.notifications.overdue=this.checked;saveSettingsRemote()"> Alerta de atrasadas</label><label style="display:flex;gap:10px;align-items:center;padding:6px 0"><input type="checkbox" '+(state.settings.notifications.pomodoro?'checked':'')+' onchange="state.settings.notifications.pomodoro=this.checked;saveSettingsRemote()"> Som do Pomodoro</label></div><div class="card" style="margin-top:16px"><div class="card-title">Dados</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost btn-sm" onclick="exportData()"><i data-lucide="download" style="width:14px;height:14px"></i> Exportar JSON</button></div></div>';
+  safeIcons();
 }
 function exportData(){const blob=new Blob([JSON.stringify({profiles:state.profiles,tasks:state.tasks,sessions:state.sessions,settings:state.settings},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='taskflow-export.json';a.click();toast('Dados exportados','success')}
 function deleteProfile(id){if(!confirm('Excluir perfil? Tarefas associadas serão removidas.'))return;state.profiles=state.profiles.filter(p=>p.id!==id);const toDel=state.tasks.filter(t=>t.profile===id);state.tasks=state.tasks.filter(t=>t.profile!==id);deleteProfileRemote(id);toDel.forEach(t=>deleteTaskRemote(t.id));if(state.activeProfile===id)state.activeProfile=state.profiles[0].id;applyProfileTheme();renderProfilesBar();renderAll()}
@@ -1240,7 +1355,7 @@ function openTaskModal(task){
   $('#tfRecur').value=task?task.recurrence:'none';
   $('#tfSubs').value=task&&task.subtasks?task.subtasks.map(s=>s.text).join('\n'):'';
   $('#taskModalBg').classList.add('active');
-  setTimeout(()=>$('#tfTitle').focus(),100);lucide.createIcons();
+  setTimeout(()=>$('#tfTitle').focus(),100);safeIcons();
 }
 function closeTaskModal(){$('#taskModalBg').classList.remove('active')}
 function saveTaskFromModal(){
@@ -1261,7 +1376,7 @@ function openProfileModal(){
   $('#pfIconPicker').innerHTML=ICON_OPTIONS.map(i=>'<button data-icon="'+i+'" class="'+(i===pfIconSel?'sel':'')+'"><i data-lucide="'+i+'"></i></button>').join('');
   $$('#pfIconPicker button').forEach(b=>b.onclick=()=>{pfIconSel=b.dataset.icon;$$('#pfIconPicker button').forEach(x=>x.classList.remove('sel'));b.classList.add('sel')});
   $('#pfColor').oninput=(e)=>{pfColorVal=e.target.value;updateColorMeaning()};
-  updateColorMeaning();$('#profileModalBg').classList.add('active');lucide.createIcons();
+  updateColorMeaning();$('#profileModalBg').classList.add('active');safeIcons();
 }
 function closeProfileModal(){$('#profileModalBg').classList.remove('active')}
 function updateColorMeaning(){const c=hexToHSL(pfColorVal);let key='gray';if(c.s<.15)key='gray';else if(c.h<15||c.h>=345)key='red';else if(c.h<45)key='orange';else if(c.h<70)key='yellow';else if(c.h<170)key='green';else if(c.h<260)key='blue';else if(c.h<310)key='purple';else key='pink';$('#pfColorMeaning').textContent='💡 '+COLOR_MEANINGS[key]}
@@ -1289,7 +1404,7 @@ function openDayTasks(iso){
   $('#overdueList').innerHTML=items.map(t=>taskRowHTML(t)).join('');
   bindTaskRowEvents($('#overdueList'));
   $('#overdueModalBg').classList.add('active');
-  lucide.createIcons();
+  safeIcons();
 }
 window.openDayTasks=openDayTasks;
 /* ============ ROUTER ============ */
@@ -1311,7 +1426,7 @@ function renderAvatar(){
 function openDrawer(){
   const dp=$('#drawerProfiles');dp.innerHTML='';
   state.profiles.forEach(p=>{const b=document.createElement('button');b.className='profile-chip'+(p.id===state.activeProfile?' active':'');b.innerHTML='<span class="dot" style="background:'+p.color+'"></span>'+p.name;b.onclick=()=>{switchProfile(p.id);closeDrawer()};dp.appendChild(b)});
-  $('#drawerBg').classList.add('active');$('#drawer').classList.add('active');lucide.createIcons();
+  $('#drawerBg').classList.add('active');$('#drawer').classList.add('active');safeIcons();
 }
 function closeDrawer(){$('#drawerBg').classList.remove('active');$('#drawer').classList.remove('active')}
 
@@ -1325,7 +1440,7 @@ function bindGlobalEvents(){
   $('#drawerTheme').onclick=()=>{setTheme(state.theme==='dark'?'light':'dark');closeDrawer()};
   $('#collapseBtn').onclick=()=>{const s=$('#sidebar');s.classList.toggle('collapsed');localStorage.setItem(LS_LOCAL.sidebar,s.classList.contains('collapsed')?'1':'0')};
   $('#themeBtn').onclick=()=>setTheme(state.theme==='dark'?'light':'dark');
-  $('#notifBtn').onclick=()=>{const ov=state.tasks.filter(isOverdue);if(!ov.length){toast('Nada urgente','success');return}$('#overdueList').innerHTML='<div class="task-list">'+ov.map(t=>taskRowHTML(t)).join('')+'</div>';bindTaskRowEvents($('#overdueList'));$('#overdueModalBg').classList.add('active');lucide.createIcons()};
+  $('#notifBtn').onclick=()=>{const ov=state.tasks.filter(isOverdue);if(!ov.length){toast('Nada urgente','success');return}$('#overdueList').innerHTML='<div class="task-list">'+ov.map(t=>taskRowHTML(t)).join('')+'</div>';bindTaskRowEvents($('#overdueList'));$('#overdueModalBg').classList.add('active');safeIcons()};
   $('#avatar').onclick=()=>$('#avatarMenu').classList.toggle('active');
   document.addEventListener('click',e=>{if(!e.target.closest('.avatar-wrap'))$('#avatarMenu')?.classList.remove('active');if(!e.target.closest('.avatar')&&!e.target.closest('#avatarMenuMobile'))$('#avatarMenuMobile')?.classList.remove('active')});
   $('#btnLogout').onclick=logout;
@@ -1361,7 +1476,7 @@ function init(){
   applyProfileTheme();
   bindGlobalEvents();
   setTheme(state.theme);
-  lucide.createIcons();
+  safeIcons();
 
   // Wait for firebase init
   const start=()=>{
@@ -1388,7 +1503,324 @@ function init(){
   };
   if(window._fb)start();else window.addEventListener('firebase-ready',start,{once:true});
 }
-document.addEventListener('DOMContentLoaded',init);
+document.addEventListener('DOMContentLoaded', () => {
+  // Garantir que o lucide carregou antes de inicializar
+  if(typeof lucide !== 'undefined'){
+    init();
+  } else {
+    const check = setInterval(() => {
+      if(typeof lucide !== 'undefined'){
+        clearInterval(check);
+        init();
+      }
+    }, 50);
+  }
+});
+
+/* ============================================================
+   GOOGLE CALENDAR MODULE
+   ============================================================ */
+const GCAL_CONFIG = {
+  // ═══════════════════════════════════════════════════════════
+  // ATENÇÃO: substitua com suas credenciais do Google Cloud
+  // Console: https://console.cloud.google.com/project/taskflow-50000
+  // ═══════════════════════════════════════════════════════════
+  clientId:   'COLE_SEU_CLIENT_ID_AQUI',   // OAuth 2.0 Client ID
+  apiKey:     'COLE_SUA_API_KEY_AQUI',     // API Key restrita ao domínio
+  calendarId: 'primary',
+  scopes:     'https://www.googleapis.com/auth/calendar',
+  discoveryDoc: 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest'
+};
+
+let gcal = {
+  ready: false,
+  gapiReady: false,
+  gsiReady: false,
+  tokenClient: null,
+  connected: false,
+  syncing: false,
+  events: [],
+  lastSync: null
+};
+
+// ── Inicializar GAPI ──
+function gcalInitGapi(){
+  if(GCAL_CONFIG.apiKey === 'COLE_SUA_API_KEY_AQUI') return;
+  gapi.load('client', async () => {
+    try {
+      await gapi.client.init({
+        apiKey: GCAL_CONFIG.apiKey,
+        discoveryDocs: [GCAL_CONFIG.discoveryDoc]
+      });
+      gcal.gapiReady = true;
+      gcalCheckReady();
+    } catch(e){ console.warn('GAPI init error:', e); }
+  });
+}
+
+// ── Inicializar GSI (OAuth) ──
+function gcalInitGsi(){
+  if(GCAL_CONFIG.clientId === 'COLE_SEU_CLIENT_ID_AQUI') return;
+  try {
+    gcal.tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: GCAL_CONFIG.clientId,
+      scope: GCAL_CONFIG.scopes,
+      callback: async (resp) => {
+        if(resp.error){ toast('Erro ao conectar Google Calendar: ' + resp.error, 'error'); return; }
+        gcal.connected = true;
+        // Salvar token no Firestore
+        if(state.user && window._fb){
+          await window._fb.setDoc(
+            window._fb.doc(window._fb.db, 'users', state.user.uid),
+            { gcalToken: resp.access_token, gcalConnectedAt: Date.now() },
+            { merge: true }
+          );
+        }
+        toast('Google Calendar conectado!', 'success');
+        gcalSyncAll();
+        renderSettings();
+      }
+    });
+    gcal.gsiReady = true;
+    gcalCheckReady();
+  } catch(e){ console.warn('GSI init error:', e); }
+}
+
+function gcalCheckReady(){
+  if(gcal.gapiReady && gcal.gsiReady){
+    gcal.ready = true;
+    // Auto-sync se já conectado
+    if(gcal.connected) gcalSyncAll();
+  }
+}
+
+// ── Conectar / desconectar ──
+function gcalConnect(){
+  if(!gcal.ready){ toast('Google Calendar ainda carregando, tente em segundos','error'); return; }
+  gcal.tokenClient.requestAccessToken({ prompt: 'consent' });
+}
+
+async function gcalDisconnect(){
+  gcal.connected = false;
+  gcal.events = [];
+  google.accounts.oauth2.revoke(gapi.client.getToken()?.access_token || '', () => {});
+  gapi.client.setToken(null);
+  if(state.user && window._fb){
+    await window._fb.setDoc(
+      window._fb.doc(window._fb.db, 'users', state.user.uid),
+      { gcalToken: null },
+      { merge: true }
+    );
+  }
+  toast('Google Calendar desconectado');
+  renderSettings();
+  if(state.view === 'agenda') renderAgenda();
+}
+
+// ── Sincronização completa ──
+async function gcalSyncAll(){
+  if(!gcal.ready || !gcal.connected || gcal.syncing) return;
+  gcal.syncing = true;
+  gcalUpdateIndicator(true);
+  try {
+    await gcalFetchEvents();
+    await gcalPushTasks();
+    gcal.lastSync = new Date();
+    gcalUpdateIndicator(false);
+    if(state.view === 'agenda') renderAgenda();
+  } catch(e){
+    console.warn('gcalSyncAll error:', e);
+    if(e.status === 401){ gcal.connected = false; toast('Sessão do Google expirou. Reconecte.','error'); renderSettings(); }
+    gcalUpdateIndicator(false);
+  }
+  gcal.syncing = false;
+}
+
+// ── Buscar eventos do Google Calendar ──
+async function gcalFetchEvents(){
+  const now = new Date();
+  const min = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  const max = new Date(now.getFullYear(), now.getMonth() + 3, 0).toISOString();
+  const resp = await gapi.client.calendar.events.list({
+    calendarId: GCAL_CONFIG.calendarId,
+    timeMin: min, timeMax: max,
+    singleEvents: true, orderBy: 'startTime',
+    maxResults: 200
+  });
+  gcal.events = (resp.result.items || []).filter(e => e.status !== 'cancelled');
+}
+
+// ── Enviar tarefas com data para o Google Calendar ──
+async function gcalPushTasks(){
+  const toSync = state.tasks.filter(t => t.due && t.gcalSync && t.status !== 'done');
+  for(const task of toSync){
+    await gcalUpsertEvent(task);
+  }
+}
+
+// ── Criar ou atualizar evento ──
+async function gcalUpsertEvent(task){
+  if(!gcal.ready || !gcal.connected) return;
+  const p = profileById(task.profile);
+  const colorId = p?.colorId || '1';
+  const event = {
+    summary: `[${p?.name || 'TaskFlow'}] ${task.title}`,
+    description: [
+      task.desc || '',
+      task.tags?.length ? 'Tags: ' + task.tags.join(', ') : '',
+      'Prioridade: ' + ({ high:'Alta', mid:'Média', low:'Baixa' }[task.priority] || '-'),
+      'Criado pelo TaskFlow'
+    ].filter(Boolean).join('\n'),
+    start: { date: task.due },
+    end:   { date: task.due },
+    colorId,
+    reminders: { useDefault: false, overrides: [{ method:'popup', minutes:30 }] }
+  };
+  try {
+    let resp;
+    if(task.googleEventId){
+      resp = await gapi.client.calendar.events.update({ calendarId: GCAL_CONFIG.calendarId, eventId: task.googleEventId, resource: event });
+    } else {
+      resp = await gapi.client.calendar.events.insert({ calendarId: GCAL_CONFIG.calendarId, resource: event });
+      task.googleEventId = resp.result.id;
+      await saveTask(task);
+    }
+    return resp.result;
+  } catch(e){ console.warn('gcalUpsertEvent error:', e); }
+}
+
+// ── Sincronizar tarefa individual ──
+async function gcalSyncTask(taskId){
+  const task = state.tasks.find(t => t.id === taskId);
+  if(!task){ toast('Tarefa não encontrada','error'); return; }
+  if(!task.due){ toast('Adicione uma data de vencimento para sincronizar','error'); return; }
+  if(!gcal.ready || !gcal.connected){ toast('Conecte o Google Calendar primeiro','error'); return; }
+  task.gcalSync = true;
+  await gcalUpsertEvent(task);
+  await saveTask(task);
+  toast('Sincronizado com Google Calendar!', 'success');
+  renderAll();
+}
+
+// ── Remover evento do Calendar ──
+async function gcalRemoveEvent(taskId){
+  const task = state.tasks.find(t => t.id === taskId);
+  if(!task || !task.googleEventId) return;
+  try {
+    await gapi.client.calendar.events.delete({ calendarId: GCAL_CONFIG.calendarId, eventId: task.googleEventId });
+  } catch(e){ console.warn('gcalRemoveEvent:', e); }
+  task.gcalSync = false;
+  task.googleEventId = null;
+  await saveTask(task);
+  toast('Evento removido do Google Calendar');
+  renderAll();
+}
+
+// ── Importar eventos do Google Calendar como tarefas ──
+async function gcalShowImportModal(){
+  if(!gcal.ready || !gcal.connected){ toast('Conecte o Google Calendar primeiro','error'); return; }
+  if(!gcal.events.length) await gcalFetchEvents();
+  // Filtrar eventos que ainda não foram importados
+  const imported = new Set(state.tasks.map(t => t.googleEventId).filter(Boolean));
+  const available = gcal.events.filter(e => !imported.has(e.id) && e.summary);
+  if(!available.length){ toast('Nenhum evento novo para importar'); return; }
+
+  const modal = document.createElement('div');
+  modal.className = 'modal-bg active';
+  modal.innerHTML = `
+    <div class="modal" style="max-width:500px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <div>
+          <h3 style="font-size:16px;font-weight:700">Importar do Google Calendar</h3>
+          <p style="font-size:12px;color:var(--text-muted);margin-top:2px">${available.length} evento(s) disponível(is)</p>
+        </div>
+        <button onclick="this.closest('.modal-bg').remove()" style="width:30px;height:30px;border-radius:8px;background:var(--glass-bg-subtle);display:grid;place-items:center">✕</button>
+      </div>
+      <div style="max-height:340px;overflow-y:auto;margin-bottom:16px">
+        ${available.map(e => {
+          const date = (e.start?.date || e.start?.dateTime || '').slice(0,10);
+          const fmt = date ? new Date(date+'T00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'short'}) : '';
+          return `<label class="gcal-import-item">
+            <input type="checkbox" value="${e.id}" data-title="${e.summary?.replace(/"/g,'')}" data-date="${date}">
+            <div class="ei-title">${e.summary || 'Sem título'}</div>
+            <div class="ei-date">${fmt}</div>
+          </label>`;
+        }).join('')}
+      </div>
+      <div style="display:flex;gap:10px">
+        <button onclick="this.closest('.modal-bg').remove()" class="btn-sec" style="flex:1;padding:10px;border-radius:12px;background:var(--glass-bg-subtle);font-weight:600">Cancelar</button>
+        <button onclick="gcalImportSelected(this.closest('.modal-bg'))" style="flex:1;padding:10px;border-radius:12px;background:linear-gradient(135deg,#4285F4,#34A8F5);color:#fff;font-weight:600">Importar selecionados</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
+async function gcalImportSelected(modalEl){
+  const checked = [...modalEl.querySelectorAll('input[type=checkbox]:checked')];
+  if(!checked.length){ toast('Selecione ao menos um evento'); return; }
+  const profileId = state.activeProfile || state.profiles[0]?.id;
+  let count = 0;
+  for(const cb of checked){
+    const task = {
+      id: 'task_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
+      title: cb.dataset.title,
+      desc: 'Importado do Google Calendar',
+      profile: profileId,
+      category: 'calendar',
+      priority: 'mid',
+      status: 'todo',
+      due: cb.dataset.date,
+      estimate: 0, timeSpent: 0,
+      tags: ['google-calendar'],
+      subtasks: [], recurrence: 'none',
+      gcalSync: false,
+      googleEventId: cb.value,
+      createdAt: Date.now(), updatedAt: Date.now()
+    };
+    state.tasks.push(task);
+    await saveTask(task);
+    count++;
+  }
+  modalEl.remove();
+  toast(`${count} tarefa(s) importada(s) com sucesso!`, 'success');
+  renderAll();
+}
+
+// ── Indicador de sync no header ──
+function gcalUpdateIndicator(syncing){
+  const ind = document.getElementById('gcalIndicator');
+  if(!ind) return;
+  if(syncing){
+    ind.style.display = 'flex';
+    ind.innerHTML = '<span style="width:8px;height:8px;border:2px solid rgba(66,133,244,.3);border-top-color:#4285F4;border-radius:50%;animation:spin .8s linear infinite;display:inline-block"></span> Sincronizando...';
+    ind.className = 'gcal-indicator syncing';
+  } else if(gcal.connected){
+    const t = gcal.lastSync;
+    const txt = t ? t.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
+    ind.style.display = 'flex';
+    ind.innerHTML = `<span style="width:7px;height:7px;border-radius:50%;background:#34C759"></span> Agenda sincronizada${txt?' às '+txt:''}`;
+    ind.className = 'gcal-indicator';
+  } else {
+    ind.style.display = 'none';
+  }
+}
+
+// ── Expor globalmente ──
+window.gcalConnect    = gcalConnect;
+window.gcalDisconnect = gcalDisconnect;
+window.gcalSyncTask   = gcalSyncTask;
+window.gcalRemoveEvent= gcalRemoveEvent;
+window.gcalSyncAll    = gcalSyncAll;
+window.gcalShowImportModal = gcalShowImportModal;
+window.gcalImportSelected  = gcalImportSelected;
+
+// ── Inicializar quando os scripts do Google carregarem ──
+window.gapiLoaded = () => gcalInitGapi();
+window.gsiLoaded  = () => gcalInitGsi();
+setTimeout(() => {
+  if(typeof gapi !== 'undefined') gcalInitGapi();
+  if(typeof google !== 'undefined') gcalInitGsi();
+}, 1500);
 </script>
 
 <!--
