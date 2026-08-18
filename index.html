@@ -1545,6 +1545,7 @@ let gcal = {
 
 // ── Inicializar GAPI ──
 function gcalInitGapi(){
+  if(gcal.gapiReady) return;
   if(!GCAL_CONFIG.apiKey || GCAL_CONFIG.apiKey.length < 10) return;
   gapi.load('client', async () => {
     try {
@@ -1560,6 +1561,7 @@ function gcalInitGapi(){
 
 // ── Inicializar GSI (OAuth) ──
 function gcalInitGsi(){
+  if(gcal.gsiReady) return;
   if(!GCAL_CONFIG.clientId || GCAL_CONFIG.clientId.length < 10) return;
   try {
     gcal.tokenClient = google.accounts.oauth2.initTokenClient({
@@ -1596,8 +1598,18 @@ function gcalCheckReady(){
 
 // ── Conectar / desconectar ──
 function gcalConnect(){
-  if(!gcal.ready){ toast('Google Calendar ainda carregando, tente em segundos','error'); return; }
-  gcal.tokenClient.requestAccessToken({ prompt: 'consent' });
+  // Diagnóstico detalhado
+  if(typeof gapi === 'undefined'){ toast('Script do Google não carregou. Verifique sua conexão.','error'); return; }
+  if(typeof google === 'undefined'){ toast('Google Identity Services não carregou.','error'); return; }
+  if(!gcal.gapiReady){ gcalInitGapi(); toast('Inicializando Google API, tente novamente em 2s','error'); return; }
+  if(!gcal.gsiReady){ gcalInitGsi(); toast('Inicializando Google Sign-In, tente novamente em 2s','error'); return; }
+  if(!gcal.tokenClient){ toast('Token client não inicializado. Recarregue a página.','error'); return; }
+  try {
+    gcal.tokenClient.requestAccessToken({ prompt: 'consent' });
+  } catch(e){
+    console.error('gcalConnect error:', e);
+    toast('Erro ao abrir login Google: ' + e.message, 'error');
+  }
 }
 
 async function gcalDisconnect(){
@@ -1817,10 +1829,16 @@ window.gcalImportSelected  = gcalImportSelected;
 // ── Inicializar quando os scripts do Google carregarem ──
 window.gapiLoaded = () => gcalInitGapi();
 window.gsiLoaded  = () => gcalInitGsi();
-setTimeout(() => {
-  if(typeof gapi !== 'undefined') gcalInitGapi();
-  if(typeof google !== 'undefined') gcalInitGsi();
-}, 1500);
+
+// Polling robusto — tenta a cada 300ms por até 15s
+let gcalInitAttempts = 0;
+const gcalInitPoll = setInterval(() => {
+  gcalInitAttempts++;
+  let changed = false;
+  if(typeof gapi !== 'undefined' && !gcal.gapiReady){ gcalInitGapi(); changed=true; }
+  if(typeof google !== 'undefined' && !gcal.gsiReady){ gcalInitGsi(); changed=true; }
+  if((gcal.gapiReady && gcal.gsiReady) || gcalInitAttempts > 50) clearInterval(gcalInitPoll);
+}, 300);
 </script>
 
 <!--
