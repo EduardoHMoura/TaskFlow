@@ -1026,6 +1026,8 @@ function bindPostRender(){
   document.querySelectorAll('[data-agendasub]').forEach(b=>b.onclick=()=>{ state.ui.agendaSub=b.dataset.agendasub; render(); });
   const gsearch=document.getElementById('globalSearch');
   if(gsearch){ gsearch.value=state.ui.search; gsearch.oninput=()=>{ state.ui.search=gsearch.value; if(state.ui.view!=='tasks') setView('tasks'); else render(); }; }
+  const gcalConnectBtn=document.getElementById('btnGcalConnect'); if(gcalConnectBtn) gcalConnectBtn.onclick=gcalConnect;
+  const gcalToggleBtn=document.getElementById('btnGcalToggle'); if(gcalToggleBtn) gcalToggleBtn.onclick=()=>state.profile.gcalConnected?gcalDisconnect():gcalConnect();
 }
 
 /* ============================================================
@@ -1380,8 +1382,6 @@ function bindSettingsEvents(){
     a.href=URL.createObjectURL(blob); a.download='flowly-dados.json'; a.click();
   };
   const lg2=document.getElementById('btnLogout2'); if(lg2) lg2.onclick=()=>signOut(auth);
-  const gcalBtn=document.getElementById('btnGcalToggle'); if(gcalBtn) gcalBtn.onclick=()=>state.profile.gcalConnected?gcalDisconnect():gcalConnect();
-  const gcalConnectBtn=document.getElementById('btnGcalConnect'); if(gcalConnectBtn) gcalConnectBtn.onclick=gcalConnect;
 }
 
 /* patch render() to bind view-specific events */
