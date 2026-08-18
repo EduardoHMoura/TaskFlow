@@ -1408,9 +1408,18 @@ window.gsiLoaded=()=>{
   gcalState.tokenClient=google.accounts.oauth2.initTokenClient({ client_id:GCAL_CONFIG.clientId, scope:GCAL_CONFIG.scope, callback:(resp)=>{
     if(resp && resp.access_token){ gcalState.accessToken=resp.access_token; gapi.client.setToken(resp); saveProfileField({gcalConnected:true}); toast('📅 Google Calendar conectado!','success'); gcalFetchEvents(); render(); }
     else{ toast('Não foi possível conectar ao Google Calendar','error'); }
+  }, error_callback:(err)=>{
+    console.error('GCal OAuth error:',err);
+    const type=err?.type||'';
+    if(type==='popup_failed_to_open') toast('Pop-up bloqueado pelo navegador — permita pop-ups para este site e tente de novo','error');
+    else if(type==='popup_closed') toast('Login com Google cancelado','error');
+    else toast('Erro de autenticação Google: '+(type||'verifique o console (F12) para detalhes'),'error');
   }});
   gcalState.gsiReady=true;
 };
+if(location.protocol==='file:'){
+  console.warn('Flowly: este arquivo está sendo aberto como file:// — o Google Sign-In e o Google Calendar EXIGEM http/https e um domínio autorizado no Google Cloud Console. Sirva este arquivo por um servidor web (ex: http://localhost) para que a integração funcione.');
+}
 // Fallback robusto: os scripts do Google carregam de forma assíncrona e podem
 // disparar o evento onload ANTES deste módulo terminar de carregar (que
 // precisa baixar o SDK do Firebase primeiro). Por isso, fazemos polling até
@@ -1423,6 +1432,10 @@ const gcalInitPoll=setInterval(()=>{
   if((gcalState.gapiReady && gcalState.tokenClient) || gcalPollAttempts>60) clearInterval(gcalInitPoll);
 },300);
 async function gcalConnect(){
+  if(location.protocol==='file:'){
+    toast('Google Calendar não funciona com o arquivo aberto localmente (file://). Hospede em http/https — veja o aviso no console (F12).','error');
+    return;
+  }
   if(!gcalState.tokenClient || !gcalState.gapiReady){ toast('Conectando ao Google... tente novamente em alguns segundos','error'); return; }
   gcalState.tokenClient.requestAccessToken();
 }
