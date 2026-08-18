@@ -1402,6 +1402,8 @@ window.toast=toast;
    23. GOOGLE CALENDAR INTEGRATION
    ============================================================ */
 let gcalState={ gapiReady:false, gsiReady:false, gapiInitStarted:false, tokenClient:null, accessToken:null, events:[] };
+window.gcalState = gcalState;
+window.GCAL_CONFIG_DEBUG = GCAL_CONFIG;
 window.gapiLoaded=()=>{
   if(typeof gapi==='undefined' || gcalState.gapiInitStarted) return;
   gcalState.gapiInitStarted=true;
