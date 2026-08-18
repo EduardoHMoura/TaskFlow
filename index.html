@@ -1525,8 +1525,8 @@ const GCAL_CONFIG = {
   // ATENÇÃO: substitua com suas credenciais do Google Cloud
   // Console: https://console.cloud.google.com/project/taskflow-50000
   // ═══════════════════════════════════════════════════════════
-  clientId:   'COLE_SEU_CLIENT_ID_AQUI',   // OAuth 2.0 Client ID
-  apiKey:     'COLE_SUA_API_KEY_AQUI',     // API Key restrita ao domínio
+  clientId:   '674043564283-0e0em8k1gdipv0tn6kk9pckecp3odvof.apps.googleusercontent.com',
+  apiKey:     'AIzaSyAqX25rq38oi8SmIvMT23UOff-H3xE9Tdc',
   calendarId: 'primary',
   scopes:     'https://www.googleapis.com/auth/calendar',
   discoveryDoc: 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest'
@@ -1545,7 +1545,7 @@ let gcal = {
 
 // ── Inicializar GAPI ──
 function gcalInitGapi(){
-  if(GCAL_CONFIG.apiKey === 'COLE_SUA_API_KEY_AQUI') return;
+  if(!GCAL_CONFIG.apiKey || GCAL_CONFIG.apiKey.length < 10) return;
   gapi.load('client', async () => {
     try {
       await gapi.client.init({
@@ -1560,7 +1560,7 @@ function gcalInitGapi(){
 
 // ── Inicializar GSI (OAuth) ──
 function gcalInitGsi(){
-  if(GCAL_CONFIG.clientId === 'COLE_SEU_CLIENT_ID_AQUI') return;
+  if(!GCAL_CONFIG.clientId || GCAL_CONFIG.clientId.length < 10) return;
   try {
     gcal.tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: GCAL_CONFIG.clientId,
