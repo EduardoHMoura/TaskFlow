@@ -586,6 +586,7 @@ async function loadUserData(uid_){
 
   maybeShowDailySummary();
   scheduleNotificationChecks();
+  if(state.profile.gcalConnected) warmupGcalSession();
 }
 async function ensureDefaultProject(){
   if(!state.projects.find(p=>p.id===DEFAULT_PROJECT_ID)){
@@ -744,8 +745,12 @@ async function createTask(partial){
   };
   try{
     await setDoc(doc(db,'users',state.user.uid,'tasks',id), task);
-    if(task.dueDate && state.profile.gcalConnected) gcalUpsertEvent({id,...task});
     toast('Tarefa criada!','success');
+    if(task.dueDate && state.profile.gcalConnected){
+      const ok=await ensureGcalToken();
+      if(ok) gcalUpsertEvent({id,...task});
+      else toast('⚠️ Sessão do Google Calendar expirou — reconecte em Configurações','error');
+    }
   }catch(e){ reportFirestoreError(e,'createTask'); }
 }
 async function updateTask(id,patch){
@@ -753,7 +758,11 @@ async function updateTask(id,patch){
   try{
     await updateDoc(doc(db,'users',state.user.uid,'tasks',id), patch);
     const t=state.tasks.find(x=>x.id===id);
-    if(t && (patch.dueDate!==undefined) && state.profile.gcalConnected) gcalUpsertEvent({...t,...patch,id});
+    if(t && (patch.dueDate!==undefined) && state.profile.gcalConnected){
+      const ok=await ensureGcalToken();
+      if(ok) gcalUpsertEvent({...t,...patch,id});
+      else toast('⚠️ Sessão do Google Calendar expirou — reconecte em Configurações','error');
+    }
   }catch(e){ reportFirestoreError(e,'updateTask'); }
 }
 async function toggleComplete(id){
@@ -763,12 +772,18 @@ async function toggleComplete(id){
   if(done){
     if(t.priority==='urgent') fireConfetti();
     checkDailyGoal();
-    if(state.profile.gcalConnected && t.googleEventId) gcalMarkDone(t);
+    if(state.profile.gcalConnected && t.googleEventId){
+      const ok=await ensureGcalToken();
+      if(ok) gcalMarkDone(t);
+    }
   }
 }
 async function deleteTask(id){
   const t=state.tasks.find(x=>x.id===id);
-  if(t?.googleEventId && state.profile.gcalConnected) gcalDeleteEvent(t);
+  if(t?.googleEventId && state.profile.gcalConnected){
+    const ok=await ensureGcalToken();
+    if(ok) await gcalDeleteEvent(t);
+  }
   await deleteDoc(doc(db,'users',state.user.uid,'tasks',id));
   toast('Tarefa excluída');
 }
@@ -1245,7 +1260,10 @@ async function setTaskStatus(id,status){
   if(status==='done'){
     if(t.priority==='urgent') fireConfetti();
     checkDailyGoal();
-    if(state.profile.gcalConnected && t.googleEventId) gcalMarkDone({...t,...patch,id});
+    if(state.profile.gcalConnected && t.googleEventId){
+      const ok=await ensureGcalToken();
+      if(ok) gcalMarkDone({...t,...patch,id});
+    }
   }
 }
 let kanbanDraggedId=null;
@@ -1638,6 +1656,38 @@ window.toast=toast;
    23. GOOGLE CALENDAR INTEGRATION
    ============================================================ */
 let gcalState={ gapiReady:false, gsiReady:false, gapiInitStarted:false, tokenClient:null, accessToken:null, events:[] };
+let gcalReauthCooldown=0;
+// O access token do OAuth só vive na memória da aba — some ao recarregar a
+// página, mesmo que 'gcalConnected' continue true no perfil salvo. Antes de
+// qualquer sincronização, tentamos renovar silenciosamente (sem popup, se o
+// navegador permitir) usando a sessão do Google já autorizada anteriormente.
+function ensureGcalToken(){
+  return new Promise((resolve)=>{
+    if(gcalState.accessToken){ resolve(true); return; }
+    if(!gcalState.tokenClient || !gcalState.gapiReady){ resolve(false); return; }
+    const now=Date.now();
+    if(now - gcalReauthCooldown < 15000){ resolve(false); return; }
+    gcalReauthCooldown=now;
+    try{ gcalState.tokenClient.requestAccessToken({ prompt:'' }); }
+    catch(e){ resolve(false); return; }
+    let tries=0;
+    const iv=setInterval(()=>{
+      tries++;
+      if(gcalState.accessToken){ clearInterval(iv); resolve(true); }
+      else if(tries>20){ clearInterval(iv); resolve(false); }
+    },250);
+  });
+}
+// Tenta restaurar a sessão do Google logo ao carregar o app (em vez de só na
+// hora de sincronizar), assim a primeira tarefa criada já sincroniza direto.
+function warmupGcalSession(){
+  let tries=0;
+  const iv=setInterval(()=>{
+    tries++;
+    if(gcalState.tokenClient && gcalState.gapiReady){ clearInterval(iv); ensureGcalToken(); }
+    else if(tries>40){ clearInterval(iv); }
+  },300);
+}
 window.gcalState = gcalState;
 window.GCAL_CONFIG_DEBUG = GCAL_CONFIG;
 window.gapiLoaded=()=>{
