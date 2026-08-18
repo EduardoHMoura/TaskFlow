@@ -1334,6 +1334,16 @@ function renderSettingsHTML(){
       <div style="flex:1"><b>${state.profile.gcalConnected?'Conectado':'Não conectado'}</b><div style="font-size:12px;color:var(--text-muted)">Tarefas com data são sincronizadas automaticamente.</div></div>
       <button class="btn-sec" id="btnGcalToggle">${state.profile.gcalConnected?'Desconectar':'Conectar'}</button>
     </div>
+    <div style="margin-top:14px;padding:12px 14px;border-radius:12px;background:var(--glass-bg-subtle);font-size:12px;font-family:monospace;line-height:1.8">
+      <b style="font-family:inherit">Diagnóstico</b><br>
+      Origem atual: ${location.origin}${location.protocol==='file:'?' ⚠️ (file:// não funciona)':''}<br>
+      Script api.js (gapi): ${typeof gapi!=='undefined' ? '✅ carregado' : '❌ não carregado'}<br>
+      Script gsi/client (google): ${typeof google!=='undefined' ? '✅ carregado' : '❌ não carregado'}<br>
+      gapi.client.init: ${gcalState.gapiReady?'✅ ok':'❌ pendente/falhou'}<br>
+      Token client (OAuth): ${gcalState.tokenClient?'✅ pronto':'❌ pendente/falhou'}<br>
+      ${gcalState.loadFailed?`<span style="color:var(--prio-urgent)">Falha detectada: ${gcalState.loadFailedReason}</span><br>`:''}
+      Client ID: ${GCAL_CONFIG.clientId}
+    </div>
   </div>
   <div class="settings-sec card glass">
     <h3>Notificações</h3>
@@ -1400,7 +1410,7 @@ window.gapiLoaded=()=>{
       await gapi.client.init({apiKey:GCAL_CONFIG.apiKey,discoveryDocs:['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest']});
       gcalState.gapiReady=true;
       gcalUpdateIndicator();
-    }catch(e){ console.warn('gapi.client.init falhou',e); gcalState.gapiInitStarted=false; }
+    }catch(e){ console.warn('gapi.client.init falhou',e); gcalState.gapiInitStarted=false; gcalState.loadFailed=true; gcalState.loadFailedReason='gapi.client.init falhou: '+(e?.message||e?.error||JSON.stringify(e)); if(state.ui.view==='settings') render(); }
   });
 };
 window.gsiLoaded=()=>{
@@ -1429,7 +1439,17 @@ const gcalInitPoll=setInterval(()=>{
   gcalPollAttempts++;
   if(typeof gapi!=='undefined' && !gcalState.gapiReady) window.gapiLoaded();
   if(typeof google!=='undefined' && !gcalState.tokenClient) window.gsiLoaded();
-  if((gcalState.gapiReady && gcalState.tokenClient) || gcalPollAttempts>60) clearInterval(gcalInitPoll);
+  if(gcalState.gapiReady && gcalState.tokenClient) clearInterval(gcalInitPoll);
+  else if(gcalPollAttempts>60){
+    clearInterval(gcalInitPoll);
+    gcalState.loadFailed=true;
+    if(typeof gapi==='undefined') gcalState.loadFailedReason='Script apis.google.com/js/api.js não carregou (gapi indefinido)';
+    else if(typeof google==='undefined') gcalState.loadFailedReason='Script accounts.google.com/gsi/client não carregou (google indefinido)';
+    else if(!gcalState.gapiReady) gcalState.loadFailedReason='gapi carregou mas gapi.client.init falhou (veja console)';
+    else gcalState.loadFailedReason='Motivo desconhecido — veja o console (F12)';
+    console.error('Flowly: falha ao inicializar Google APIs —', gcalState.loadFailedReason);
+    if(state.ui.view==='settings') render();
+  }
 },300);
 async function gcalConnect(){
   if(location.protocol==='file:'){
